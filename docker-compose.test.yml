@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  pxe-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: pxe-test-server
+    environment:
+      # Test environment variables
+      - DHCP_SUBNET=192.168.1.0
+      - DHCP_NETMASK=255.255.255.0
+      - DHCP_RANGE_START=192.168.1.100
+      - DHCP_RANGE_END=192.168.1.200
+      - DHCP_ROUTER=192.168.1.1
+      - DHCP_DNS=8.8.8.8
+      - NGINX_PORT=8080
+      - LOG_LEVEL=debug
+    volumes:
+      - ./configs:/etc/pxe:ro
+      - ./nginx-root:/var/www/html:rw
+      - ./logs:/var/log/pxe:rw
+      - ./test-results:/test-results:rw
+    command: ["/bin/bash", "-c", "echo 'Test environment ready' && sleep 30"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  test-runner:
+    image: bash:latest
+    volumes:
+      - .:/workspace:ro
+      - ./test-results:/test-results:rw
+    working_dir: /workspace
+    command: ["/bin/bash", "-c", "./scripts/run-tests.sh"]
+    depends_on:
+      pxe-test:
+        condition: service_healthy
+
+  security-scan:
+    image: docker/docker-bench-security:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["docker", "docker-bench-security"]
+    environment:
+      - DOCKER_BENCH_SECURITY_OPTS=--no-colors
+
+  vuln-scan:
+    image: aquasecurity/trivy:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["image", "--no-progress", "--exit-code", "1", "pxe-server:latest"]
+    environment:
+      - TRIVY_TIMEOUT=10m

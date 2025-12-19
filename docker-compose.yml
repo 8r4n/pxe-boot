@@ -1,0 +1,164 @@
+version: '3.8'
+
+services:
+  pxe-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: pxe-boot-server
+    image: pxe-server:latest
+
+    # Production networking - use host network or macvlan for DHCP
+    network_mode: host
+    # Alternative: Use macvlan for dedicated network interface
+    # networks:
+    #   pxe-net:
+    #     driver: macvlan
+    #     driver_opts:
+    #       parent: eth0  # Change to your network interface
+
+    # Environment-based configuration
+    environment:
+      # DHCP Configuration
+      - DHCP_SUBNET=${DHCP_SUBNET:-192.168.1.0}
+      - DHCP_NETMASK=${DHCP_NETMASK:-255.255.255.0}
+      - DHCP_RANGE_START=${DHCP_RANGE_START:-192.168.1.100}
+      - DHCP_RANGE_END=${DHCP_RANGE_END:-192.168.1.200}
+      - DHCP_ROUTER=${DHCP_ROUTER:-192.168.1.1}
+      - DHCP_DNS=${DHCP_DNS:-8.8.8.8,1.1.1.1}
+      - DHCP_DOMAIN=${DHCP_DOMAIN:-localdomain}
+      - DHCP_LEASE_TIME=${DHCP_LEASE_TIME:-86400}
+      - HTTP_SERVER_IP=${HTTP_SERVER_IP:-192.168.1.10}
+
+
+
+      # Nginx Configuration
+      - NGINX_PORT=${NGINX_PORT:-8080}
+      - NGINX_WORKER_PROCESSES=${NGINX_WORKER_PROCESSES:-auto}
+      - NGINX_WORKER_CONNECTIONS=${NGINX_WORKER_CONNECTIONS:-1024}
+
+      # PXE Configuration
+      - PXE_BOOT_TIMEOUT=${PXE_BOOT_TIMEOUT:-50}
+      - PXE_DEFAULT_BOOT=${PXE_DEFAULT_BOOT:-local}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+
+      # Security
+      - ALLOWED_NETWORKS=${ALLOWED_NETWORKS:-192.168.1.0/24}
+
+    # Persistent volumes for configuration and data
+    volumes:
+      - ./configs:/etc/pxe:ro
+      - ./nginx-root:/var/www/html:rw
+      - ./logs:/var/log/pxe:rw
+      - dhcpd_leases:/var/lib/dhcpd
+
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Enhanced security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # For DHCP (port 67)
+      - NET_RAW         # For network operations
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/log/pxe
+    # Security profiles
+    profiles:
+      - secure
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+      # Alternative: Send to syslog or external service
+      # driver: syslog
+      # options:
+      #   syslog-address: "tcp://logstash:514"
+
+    # Labels for orchestration
+    labels:
+      - "project=pxe-boot"
+      - "service=pxe-server"
+      - "version=1.0.0"
+      - "maintainer=PXE Boot Server Team"
+
+# Optional: Separate logging service
+# services:
+#   logstash:
+#     image: docker.elastic.co/logstash/logstash:8.5.0
+#     volumes:
+#       - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+#     ports:
+#       - "514:514/tcp"
+
+# Optional: Monitoring service
+#   prometheus:
+#     image: prom/prometheus:latest
+#     volumes:
+#       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+#       - prometheus_data:/prometheus
+#     command:
+#       - '--config.file=/etc/prometheus/prometheus.yml'
+#       - '--storage.tsdb.path=/prometheus'
+#       - '--web.console.libraries=/etc/prometheus/console_libraries'
+#       - '--web.console.templates=/etc/prometheus/consoles'
+#       - '--storage.tsdb.retention.time=200h'
+#       - '--web.enable-lifecycle'
+#     ports:
+#       - "9090:9090"
+
+# Networks
+# networks:
+#   pxe-net:
+#     driver: macvlan
+#     driver_opts:
+#       parent: eth0
+#     ipam:
+#       config:
+#         - subnet: 192.168.1.0/24
+#           gateway: 192.168.1.1
+
+# Volumes
+volumes:
+  dhcpd_leases:
+    driver: local
+  # prometheus_data:
+  #   driver: local
+
+# Environment file for sensitive configuration
+# .env file should contain:
+# DHCP_SUBNET=192.168.1.0
+# DHCP_NETMASK=255.255.255.0
+# etc.
