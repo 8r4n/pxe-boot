@@ -1,31 +1,6 @@
 # PXE Boot Server - Production Dockerfile
 # Multi-stage build for security and optimization
 
-# Build stage for custom binaries and preparation
-FROM rockylinux:9 AS builder
-
-# Install build dependencies
-RUN dnf update -y && \
-    dnf install -y \
-        gcc \
-        make \
-        wget \
-        tar \
-        gzip \
-        xz \
-        && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf/*
-
-# Download and prepare syslinux for PXE boot
-RUN mkdir -p /build && \
-    cd /build && \
-    wget https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.04-pre1.tar.xz && \
-    tar -xf syslinux-6.04-pre1.tar.xz && \
-    cd syslinux-6.04-pre1 && \
-    make bios && \
-    make install
-
 # Runtime stage - minimal, secure image
 FROM rockylinux:9
 
@@ -38,9 +13,9 @@ LABEL maintainer="PXE Boot Server Team" \
 
 # Install runtime dependencies with minimal footprint
 RUN dnf update -y --security && \
-    dnf install -y \
+    dnf install -y --allowerasing \
         dhcp-server \
-
+        syslinux-tftpboot \
         nginx \
         iproute \
         net-tools \
@@ -62,15 +37,15 @@ RUN dnf update -y --security && \
     # Clean up package manager cache
     rm -rf /var/lib/dnf/history* /var/lib/dnf/yumdb/* /var/log/dnf* && \
     # Create necessary directories
-    mkdir -p /var/www/html /var/log/pxe /run/nginx
+    mkdir -p /var/www/html /var/log/pxe /run/nginx /tmp/pxe-boot-files
 
-# Copy syslinux files from builder stage for HTTP boot
+# Copy syslinux files for HTTP boot
 # These will be copied to a temporary location and moved during startup
-COPY --from=builder /usr/share/syslinux/pxelinux.0 /tmp/pxe-boot-files/
-COPY --from=builder /usr/share/syslinux/menu.c32 /tmp/pxe-boot-files/
-COPY --from=builder /usr/share/syslinux/ldlinux.c32 /tmp/pxe-boot-files/
-COPY --from=builder /usr/share/syslinux/libcom32.c32 /tmp/pxe-boot-files/
-COPY --from=builder /usr/share/syslinux/libutil.c32 /tmp/pxe-boot-files/
+RUN cp /tftpboot/pxelinux.0 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/menu.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/ldlinux.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/libcom32.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/libutil.c32 /tmp/pxe-boot-files/
 
 # Create non-root user for running services
 RUN groupadd -r pxeuser && \
@@ -81,14 +56,14 @@ RUN groupadd -r pxeuser && \
 # Copy configuration templates and scripts
 COPY configs/ /etc/pxe/
 COPY scripts/ /usr/local/bin/
+COPY healthcheck.sh /usr/local/bin/
 
-# Make scripts executable
+# Make scripts executable before changing ownership
 RUN chmod +x /usr/local/bin/*.sh && \
     chmod 644 /etc/pxe/*
 
-# Copy health check script
-COPY --chown=pxeuser:pxeuser healthcheck.sh /usr/local/bin/healthcheck.sh
-RUN chmod +x /usr/local/bin/healthcheck.sh
+# Change ownership of files that need to be owned by pxeuser
+RUN chown pxeuser:pxeuser /usr/local/bin/healthcheck.sh
 
 # Configure nginx for non-root operation
 RUN sed -i 's/user nginx;/user pxeuser;/' /etc/nginx/nginx.conf && \
@@ -115,5 +90,6 @@ RUN chmod 755 /usr/local/bin/* && \
     # Remove potentially dangerous files
     rm -f /bin/sh /bin/bash /usr/bin/python* /usr/bin/perl || true
 
-# Final cleanup
-RUN rm -rf /tmp/* /var/tmp/*
+# Final cleanup (exclude pxe-boot-files which are needed by the application)
+RUN find /tmp -mindepth 1 -not -path '/tmp/pxe-boot-files*' -delete && \
+    rm -rf /var/tmp/*
