@@ -35,6 +35,8 @@ validate_environment() {
         ["DHCP_RANGE_END"]="192.168.1.200"
         ["DHCP_ROUTER"]="192.168.1.1"
         ["DHCP_DNS"]="8.8.8.8"
+        ["DHCP_DOMAIN"]="localdomain"
+        ["DHCP_LEASE_TIME"]="86400"
         ["NGINX_PORT"]="8080"
     )
 
@@ -42,6 +44,8 @@ validate_environment() {
         if [ -z "${!var:-}" ]; then
             export "$var=${required_vars[$var]}"
             log "Setting default value for $var: ${required_vars[$var]}"
+        else
+            export "$var"
         fi
     done
 
@@ -62,8 +66,6 @@ generate_configs() {
     # Generate DHCP configuration
     envsubst < /etc/pxe/dhcpd.conf > /etc/dhcp/dhcpd.conf
     log "Generated DHCP configuration"
-
-
 
     # Generate Nginx configuration
     envsubst < /etc/pxe/nginx.conf > /etc/nginx/nginx.conf
@@ -123,7 +125,7 @@ setup_directories() {
     # Set proper permissions
     chown -R pxeuser:pxeuser /var/www/html /var/log/pxe /run/nginx
     chown pxeuser:pxeuser /var/lib/dhcpd
-    chmod 644 /etc/dhcp/dhcpd.conf
+    # Note: DHCP config permissions are set during container build
 
     log "Directory setup complete"
 }

@@ -26,6 +26,7 @@ RUN dnf update -y --security && \
         wget \
         vim-minimal \
         less \
+        gettext \
         && \
     dnf clean all && \
     rm -rf /var/cache/dnf/* && \
@@ -39,19 +40,23 @@ RUN dnf update -y --security && \
     # Create necessary directories
     mkdir -p /var/www/html /var/log/pxe /run/nginx /tmp/pxe-boot-files
 
-# Copy syslinux files for HTTP boot
-# These will be copied to a temporary location and moved during startup
-RUN cp /tftpboot/pxelinux.0 /tmp/pxe-boot-files/ && \
-    cp /tftpboot/menu.c32 /tmp/pxe-boot-files/ && \
-    cp /tftpboot/ldlinux.c32 /tmp/pxe-boot-files/ && \
-    cp /tftpboot/libcom32.c32 /tmp/pxe-boot-files/ && \
-    cp /tftpboot/libutil.c32 /tmp/pxe-boot-files/
-
 # Create non-root user for running services
 RUN groupadd -r pxeuser && \
     useradd -r -g pxeuser -s /sbin/nologin pxeuser && \
     chown -R pxeuser:pxeuser /var/www/html /var/log/pxe /run/nginx && \
-    chown pxeuser:pxeuser /var/lib/dhcpd /etc/dhcp/dhcpd.conf
+    chown -R pxeuser:pxeuser /var/lib/dhcpd && \
+    touch /etc/dhcp/dhcpd.conf /etc/nginx/nginx.conf && \
+    chown pxeuser:pxeuser /etc/dhcp/dhcpd.conf /etc/nginx/nginx.conf
+
+# Copy syslinux files for HTTP boot
+# These will be copied to a temporary location and moved during startup
+RUN mkdir -p /tmp/pxe-boot-files && \
+    cp /tftpboot/pxelinux.0 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/menu.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/ldlinux.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/libcom32.c32 /tmp/pxe-boot-files/ && \
+    cp /tftpboot/libutil.c32 /tmp/pxe-boot-files/ && \
+    chown -R pxeuser:pxeuser /tmp/pxe-boot-files
 
 # Copy configuration templates and scripts
 COPY configs/ /etc/pxe/
@@ -68,6 +73,11 @@ RUN chown pxeuser:pxeuser /usr/local/bin/healthcheck.sh
 # Configure nginx for non-root operation
 RUN sed -i 's/user nginx;/user pxeuser;/' /etc/nginx/nginx.conf && \
     sed -i 's/pid \/run\/nginx.pid;/pid \/run\/nginx\/nginx.pid;/' /etc/nginx/nginx.conf
+
+# Ensure config files have correct ownership (after all package installations)
+RUN touch /etc/dhcp/dhcpd.conf /etc/nginx/nginx.conf /var/lib/dhcpd/dhcpd.leases && \
+    chown pxeuser:pxeuser /etc/dhcp/dhcpd.conf /etc/nginx/nginx.conf /var/lib/dhcpd/dhcpd.leases && \
+    chmod 755 /etc/dhcp
 
 # Expose ports
 EXPOSE 67/udp 8080/tcp

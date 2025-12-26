@@ -5,7 +5,12 @@
 set -e
 
 # Configuration
-TEST_RESULTS_DIR="/test-results"
+# Use test-results in current directory if running locally, or /test-results if in container
+if [ -d "/test-results" ]; then
+    TEST_RESULTS_DIR="/test-results"
+else
+    TEST_RESULTS_DIR="./test-results"
+fi
 TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
 TEST_LOG="${TEST_RESULTS_DIR}/test-run-${TIMESTAMP}.log"
 
